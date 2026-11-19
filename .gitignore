@@ -1,0 +1,7 @@
+node_modules
+.pgdata
+*.log
+dist
+.env
+.DS_Store
+Thumbs.db

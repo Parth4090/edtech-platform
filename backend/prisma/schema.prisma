@@ -1,0 +1,281 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+}
+
+enum ProductType {
+  CHAPTER
+  SUBJECT
+  MONTHLY_PASS
+  ANNUAL_PASS
+  BUNDLE
+}
+
+enum DiscountType {
+  FLAT
+  PERCENTAGE
+}
+
+enum OrderStatus {
+  CREATED
+  PAID
+  FAILED
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+enum EntitlementType {
+  CHAPTER
+  SUBJECT
+  CLASS_PASS
+}
+
+model User {
+  id              String         @id @default(uuid())
+  email           String         @unique
+  passwordHash    String
+  name            String
+  phone           String?
+  role            Role           @default(STUDENT)
+  orders          Order[]
+  entitlements    Entitlement[]
+  auditLogs       AuditLog[]     @relation("AdminAudits")
+  resetToken      String?
+  resetTokenExpiry DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([email])
+}
+
+model Board {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  slug        String    @unique
+  description String?
+  icon        String?
+  classes     Class[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Class {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String
+  order       Int       @default(0)
+  boardId     String
+  board       Board     @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  subjects    Subject[]
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([boardId, slug])
+  @@index([boardId])
+}
+
+model Subject {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String
+  description String?
+  icon        String?
+  classId     String
+  class       Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  chapters    Chapter[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([classId, slug])
+  @@index([classId])
+}
+
+model Chapter {
+  id            String         @id @default(uuid())
+  title         String
+  slug          String
+  chapterNumber Int            @default(1)
+  description   String?
+  isFree        Boolean        @default(false)
+  subjectId     String
+  subject       Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  materials     Material[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([subjectId, slug])
+  @@index([subjectId])
+}
+
+model Material {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  filePath    String
+  fileSize    Int      @default(0)
+  pageCount   Int      @default(1)
+  chapterId   String
+  chapter     Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([chapterId])
+}
+
+model Product {
+  id                  String       @id @default(uuid())
+  title               String
+  description         String?
+  type                ProductType
+  targetId            String
+  classId             String?
+  class               Class?       @relation(fields: [classId], references: [id], onDelete: SetNull)
+  priceInPaise        Int
+  originalPriceInPaise Int
+  isActive            Boolean      @default(true)
+  orderItems          OrderItem[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([type, targetId])
+  @@index([classId])
+}
+
+model Coupon {
+  id                  String       @id @default(uuid())
+  code                String       @unique
+  description         String?
+  discountType        DiscountType
+  discountValue       Int
+  minOrderValueInPaise Int         @default(0)
+  maxDiscountInPaise  Int?
+  validUntil          DateTime
+  usageLimit          Int          @default(100)
+  timesUsed           Int          @default(0)
+  isActive            Boolean      @default(true)
+  orders              Order[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([code])
+}
+
+model Order {
+  id                   String      @id @default(uuid())
+  orderNumber          String      @unique
+  userId               String
+  user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  razorpayOrderId      String?     @unique
+  subtotalInPaise      Int
+  discountInPaise      Int         @default(0)
+  upgradeCreditInPaise Int         @default(0)
+  gstInPaise           Int         @default(0)
+  totalInPaise         Int
+  status               OrderStatus @default(CREATED)
+  invoiceNumber        String?     @unique
+  couponId             String?
+  coupon               Coupon?     @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  items                OrderItem[]
+  payments             Payment[]
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([razorpayOrderId])
+  @@index([status])
+}
+
+model OrderItem {
+  id                  String      @id @default(uuid())
+  orderId             String
+  order               Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId           String
+  product             Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  title               String
+  itemType            ProductType
+  targetId            String
+  priceInPaise        Int
+  originalPriceInPaise Int
+  createdAt           DateTime    @default(now())
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Payment {
+  id                 String        @id @default(uuid())
+  orderId            String
+  order              Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  razorpayPaymentId  String        @unique
+  razorpayOrderId    String
+  razorpaySignature  String?
+  amountInPaise      Int
+  method             String        @default("upi")
+  status             PaymentStatus @default(PENDING)
+  failureReason      String?
+  rawResponse        String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([orderId])
+  @@index([razorpayOrderId])
+  @@index([status])
+}
+
+model WebhookEvent {
+  id        String   @id @default(uuid())
+  eventId   String   @unique
+  eventType String
+  payload   String
+  status    String   @default("PROCESSED")
+  createdAt DateTime @default(now())
+
+  @@index([eventId])
+}
+
+model Entitlement {
+  id             String          @id @default(uuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           EntitlementType
+  targetId       String
+  validUntil     DateTime?
+  orderId        String?
+  grantedByAdmin Boolean         @default(false)
+  auditReason    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([userId, type, targetId])
+  @@index([userId])
+  @@index([type, targetId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  adminId    String
+  admin      User     @relation("AdminAudits", fields: [adminId], references: [id], onDelete: Cascade)
+  action     String
+  targetType String
+  targetId   String
+  reason     String
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  @@index([adminId])
+  @@index([targetType, targetId])
+}
